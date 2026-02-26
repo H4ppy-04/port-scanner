@@ -1,4 +1,4 @@
-service,port,protocol,comment
+name,port,protocol,comment
 tcpmux,1,tcp,TCP port service multiplexer
 tcpmux,1,udp,TCP port service multiplexer
 rje,5,tcp,Remote Job Entry

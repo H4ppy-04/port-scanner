@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use csv::Reader;
+use serde::Deserialize;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -6,12 +8,21 @@ use std::time::Duration;
 
 const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
+const SERVICES_FILE: &str = "services.csv";
 
 #[derive(Parser)]
 #[command(version, about, arg_required_else_help = true, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Service {
+    name: String,
+    port: u16,
+    protocol: String,
+    comment: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
@@ -92,7 +103,24 @@ pub fn main() {
         None => {}
     }
 
+    let mut reader = Reader::from_path(SERVICES_FILE).unwrap();
+    let mut services: Vec<Service> = Vec::new();
+    for i in reader.deserialize() {
+        let service: Service = i.unwrap();
+        services.push(service);
+    }
+
     for port in open_ports.lock().unwrap().iter() {
-        println!("{port} ..... OPEN")
+        for service in services.iter() {
+            if service.port == *port {
+                let protocol = &service.protocol;
+                let name = &service.name;
+                if let Some(description) = &service.comment {
+                    println!("{port}/{protocol} - {name} ({description})");
+                } else {
+                    println!("{port}/{protocol} - {name}");
+                }
+            }
+        }
     }
 }
