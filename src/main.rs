@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 const PORT_LIMIT: u16 = 1024;
+const STATIC_TIMOUT_MS: u64 = 150;
 
 #[derive(Parser)]
 #[command(version, about, arg_required_else_help = true, long_about = None)]
@@ -39,7 +40,8 @@ fn scan_port(port: u16, address: &str) -> bool {
     let socket = format!("{address}:{port}");
     if let Ok(mut addrs) = socket.to_socket_addrs() {
         if let Some(addr) = addrs.next() {
-            return TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok();
+            return TcpStream::connect_timeout(&addr, Duration::from_millis(STATIC_TIMOUT_MS))
+                .is_ok();
         }
     }
     false
