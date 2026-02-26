@@ -5,7 +5,7 @@ A blazingly fast port scanner written in Rust 🦀
 
 ## Features
 
- - Fast and slow mode (50 ms, 250 ms)
+ - Blazingly fast multithreading with _fast_ mode
  - Compile report at end of scan
  - Limits to 1024 ports
  - Custom address specification
