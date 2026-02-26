@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
+use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -47,6 +48,17 @@ enum OutputFormat {
     Text,
 }
 
+#[derive(Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
+enum PortOutput {
+    /// Show only TCP
+    #[default]
+    Tcp,
+    /// Show only UDP
+    Udp,
+    /// Show both TCP, UDP, and any other protocols
+    All,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Scan port range
@@ -74,6 +86,12 @@ enum Commands {
         /// The default value is simply plain text.
         #[arg(long, value_enum)]
         format: Option<OutputFormat>,
+
+        /// Port options to show.
+        ///
+        /// The default value is TCP.
+        #[arg(value_enum, long)]
+        port_output: Option<PortOutput>,
     },
 }
 
@@ -105,10 +123,13 @@ pub fn main() {
             mode,
             timeout,
             format,
+            port_output,
         }) => {
             let port_limit = port.unwrap_or(PORT_LIMIT);
             if mode.is_some_and(|m| m == Mode::Fast) || mode.is_none() {
                 // perform multithreading
+                let spinner = ProgressBar::new_spinner();
+
                 for port in 1..=port_limit {
                     let open_ports = Arc::clone(&open_ports);
                     let address = address.clone();
@@ -125,10 +146,17 @@ pub fn main() {
                         }
                     });
                     handles.push(handle);
+                    spinner.set_message(format!("Scanning port {port}/{port_limit}"));
+                    spinner.tick();
                 }
                 for handle in handles {
                     handle.join().unwrap();
                 }
+                spinner.finish_with_message(format!(
+                    "Finished scanning {} ports ({} open)",
+                    port_limit,
+                    open_ports.lock().unwrap().iter().count()
+                ));
             } else {
                 for port in 1..=port_limit {
                     let is_open = scan_port(port, &address, timeout);
@@ -159,29 +187,44 @@ pub fn main() {
             if format == Some(OutputFormat::Csv) {
                 println!("port,protocol,name,description")
             }
+            let mut shown_ports: Vec<u16> = vec![];
             for port in open_ports.lock().unwrap().iter() {
                 for service in services.iter() {
-                    if service.port == *port {
-                        let protocol = &service.protocol;
-                        let name = &service.name;
-                        match format {
-                            Some(OutputFormat::Json) => {
-                                let json = serde_json::to_string_pretty(&services).unwrap();
-                                println!("{json}");
+                    if service.port != *port {
+                        continue;
+                    }
+                    let protocol = &service.protocol;
+                    let name = &service.name;
+
+                    match port_output {
+                        Some(PortOutput::Tcp) if service.protocol != "tcp" => continue,
+                        Some(PortOutput::Udp) if service.protocol != "udp" => continue,
+                        Some(PortOutput::All) | None => {}
+                        _ => {}
+                    }
+
+                    if shown_ports.contains(&service.port) {
+                        continue;
+                    }
+                    shown_ports.push(service.port);
+
+                    match format {
+                        Some(OutputFormat::Json) => {
+                            let json = serde_json::to_string_pretty(&services).unwrap();
+                            println!("{json}");
+                        }
+                        Some(OutputFormat::Csv) => {
+                            if let Some(description) = &service.comment {
+                                println!("{port},{protocol},{name},{description}");
+                            } else {
+                                println!("{port},{protocol},{name}");
                             }
-                            Some(OutputFormat::Csv) => {
-                                if let Some(description) = &service.comment {
-                                    println!("{port},{protocol},{name},{description}");
-                                } else {
-                                    println!("{port},{protocol},{name}");
-                                }
-                            }
-                            Some(OutputFormat::Text) | None => {
-                                if let Some(description) = &service.comment {
-                                    println!("{port}/{protocol} - {name} ({description})");
-                                } else {
-                                    println!("{port}/{protocol} - {name}");
-                                }
+                        }
+                        Some(OutputFormat::Text) | None => {
+                            if let Some(description) = &service.comment {
+                                println!("{port}/{protocol} - {name} ({description})");
+                            } else {
+                                println!("{port}/{protocol} - {name}");
                             }
                         }
                     }
