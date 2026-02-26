@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
 use serde::Deserialize;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -41,6 +41,12 @@ enum Commands {
         #[arg()]
         address: String,
 
+        /// Port limit within address to scan
+        ///
+        /// The default is capped at 1024, however this can be changed up to 25565
+        #[arg(short, long, value_parser = value_parser!(u16).range(0..=25565))]
+        port: Option<u16>,
+
         #[arg(value_enum, long)]
         mode: Mode,
 
@@ -75,13 +81,15 @@ pub fn main() {
 
     match cli.command {
         Some(Commands::Scan {
-            mode,
             address,
+            port,
+            mode,
             timeout,
         }) => {
+            let port_limit = port.unwrap_or(PORT_LIMIT);
             if mode == Mode::Fast {
                 // perform multithreading
-                for port in 1..PORT_LIMIT {
+                for port in 1..=port_limit {
                     let open_ports = Arc::clone(&open_ports);
                     let address = address.clone();
 
@@ -102,7 +110,7 @@ pub fn main() {
                     handle.join().unwrap();
                 }
             } else {
-                for port in 1..PORT_LIMIT {
+                for port in 1..=port_limit {
                     let is_open = scan_port(port, &address, timeout);
                     if is_open {
                         println!("{port}: OPEN");
