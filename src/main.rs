@@ -27,7 +27,7 @@ struct Service {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
 enum Mode {
-    /// Run swiftly
+    /// Run swiftly. This uses multithreading and is much faster.
     Fast,
 
     /// Crawly slowly
@@ -41,18 +41,27 @@ enum Commands {
         #[arg()]
         address: String,
 
-        #[arg(value_enum)]
+        #[arg(value_enum, long)]
         mode: Mode,
+
+        /// How long (in milliseconds) a port gets scanned for before it's dropped.
+        ///
+        /// The default value is 150 if none is specified.
+        #[arg(long)]
+        timeout: Option<u64>,
     },
 }
 
 /// Establish if a port is open or closed.
-fn scan_port(port: u16, address: &str) -> bool {
+fn scan_port(port: u16, address: &str, timeout: Option<u64>) -> bool {
     let socket = format!("{address}:{port}");
     if let Ok(mut addrs) = socket.to_socket_addrs() {
         if let Some(addr) = addrs.next() {
-            return TcpStream::connect_timeout(&addr, Duration::from_millis(STATIC_TIMOUT_MS))
-                .is_ok();
+            return TcpStream::connect_timeout(
+                &addr,
+                Duration::from_millis(timeout.unwrap_or(STATIC_TIMOUT_MS)),
+            )
+            .is_ok();
         }
     }
     false
@@ -64,9 +73,13 @@ pub fn main() {
     let open_ports = Arc::new(Mutex::new(Vec::new()));
     let mut handles = vec![];
 
-    match &cli.command {
-        Some(Commands::Scan { mode, address }) => {
-            if mode == &Mode::Fast {
+    match cli.command {
+        Some(Commands::Scan {
+            mode,
+            address,
+            timeout,
+        }) => {
+            if mode == Mode::Fast {
                 // perform multithreading
                 for port in 1..PORT_LIMIT {
                     let open_ports = Arc::clone(&open_ports);
@@ -76,7 +89,7 @@ pub fn main() {
                         let addr = format!("{address}:{port}");
                         if TcpStream::connect_timeout(
                             &addr.parse().unwrap(),
-                            Duration::from_millis(500),
+                            Duration::from_millis(timeout.unwrap_or(STATIC_TIMOUT_MS)),
                         )
                         .is_ok()
                         {
@@ -90,7 +103,7 @@ pub fn main() {
                 }
             } else {
                 for port in 1..PORT_LIMIT {
-                    let is_open = scan_port(port, address);
+                    let is_open = scan_port(port, &address, timeout);
                     if is_open {
                         println!("{port}: OPEN");
                         open_ports.lock().unwrap().push(port);
