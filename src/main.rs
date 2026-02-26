@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
+use std::{env, thread};
 
 const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
@@ -17,7 +18,7 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Service {
     name: String,
     port: u16,
@@ -25,13 +26,25 @@ struct Service {
     comment: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum, Default)]
 enum Mode {
     /// Run swiftly. This uses multithreading and is much faster.
+    #[default]
     Fast,
 
     /// Crawly slowly
     Slow,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
+enum OutputFormat {
+    /// Comma separated value format
+    Csv,
+    /// JavaScript object notation format
+    Json,
+    /// Plain text format
+    #[default]
+    Text,
 }
 
 #[derive(Subcommand)]
@@ -48,13 +61,19 @@ enum Commands {
         port: Option<u16>,
 
         #[arg(value_enum, long)]
-        mode: Mode,
+        mode: Option<Mode>,
 
         /// How long (in milliseconds) a port gets scanned for before it's dropped.
         ///
         /// The default value is 150 if none is specified.
         #[arg(long)]
         timeout: Option<u64>,
+
+        /// How to parse the output format.
+        ///
+        /// The default value is simply plain text.
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
     },
 }
 
@@ -85,9 +104,10 @@ pub fn main() {
             port,
             mode,
             timeout,
+            format,
         }) => {
             let port_limit = port.unwrap_or(PORT_LIMIT);
-            if mode == Mode::Fast {
+            if mode.is_some_and(|m| m == Mode::Fast) || mode.is_none() {
                 // perform multithreading
                 for port in 1..=port_limit {
                     let open_ports = Arc::clone(&open_ports);
@@ -120,28 +140,54 @@ pub fn main() {
                     }
                 }
             }
-        }
-        None => {}
-    }
 
-    let mut reader = Reader::from_path(SERVICES_FILE).unwrap();
-    let mut services: Vec<Service> = Vec::new();
-    for i in reader.deserialize() {
-        let service: Service = i.unwrap();
-        services.push(service);
-    }
+            let mut service_path: &str = SERVICES_FILE;
+            let dir = env::current_dir().unwrap();
+            let tmp_path: PathBuf;
 
-    for port in open_ports.lock().unwrap().iter() {
-        for service in services.iter() {
-            if service.port == *port {
-                let protocol = &service.protocol;
-                let name = &service.name;
-                if let Some(description) = &service.comment {
-                    println!("{port}/{protocol} - {name} ({description})");
-                } else {
-                    println!("{port}/{protocol} - {name}");
+            if dir.join("Cargo.toml").exists() {
+                tmp_path = dir.join("src/services.csv");
+                service_path = tmp_path.to_str().unwrap();
+            }
+            let mut reader = Reader::from_path(service_path).unwrap();
+            let mut services: Vec<Service> = Vec::new();
+            for i in reader.deserialize() {
+                let service: Service = i.unwrap();
+                services.push(service);
+            }
+
+            if format == Some(OutputFormat::Csv) {
+                println!("port,protocol,name,description")
+            }
+            for port in open_ports.lock().unwrap().iter() {
+                for service in services.iter() {
+                    if service.port == *port {
+                        let protocol = &service.protocol;
+                        let name = &service.name;
+                        match format {
+                            Some(OutputFormat::Json) => {
+                                let json = serde_json::to_string_pretty(&services).unwrap();
+                                println!("{json}");
+                            }
+                            Some(OutputFormat::Csv) => {
+                                if let Some(description) = &service.comment {
+                                    println!("{port},{protocol},{name},{description}");
+                                } else {
+                                    println!("{port},{protocol},{name}");
+                                }
+                            }
+                            Some(OutputFormat::Text) | None => {
+                                if let Some(description) = &service.comment {
+                                    println!("{port}/{protocol} - {name} ({description})");
+                                } else {
+                                    println!("{port}/{protocol} - {name}");
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+        None => {}
     }
 }
