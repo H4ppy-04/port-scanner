@@ -9,6 +9,7 @@ A blazingly fast port scanner written in Rust 🦀
  - Compile report at end of scan
  - Limits to a full 25565 ports
  - Custom address, port, and timeout specification
+ - Custom output formats like json and csv
 
 
 ## Usage
