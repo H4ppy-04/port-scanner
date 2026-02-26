@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 const PORT_LIMIT: u16 = 1024;
-const PORT_FAST_MS: u64 = 50;
-const PORT_SLOW_MS: u64 = 250;
 
 #[derive(Parser)]
 #[command(version, about, arg_required_else_help = true, long_about = None)]
@@ -35,17 +35,11 @@ enum Commands {
 }
 
 /// Establish if a port is open or closed.
-fn scan_port(port: u16, address: &str, mode: &Mode) -> bool {
+fn scan_port(port: u16, address: &str) -> bool {
     let socket = format!("{address}:{port}");
-    let timeout = {
-        match mode {
-            Mode::Fast => PORT_FAST_MS,
-            Mode::Slow => PORT_SLOW_MS,
-        }
-    };
     if let Ok(mut addrs) = socket.to_socket_addrs() {
         if let Some(addr) = addrs.next() {
-            return TcpStream::connect_timeout(&addr, Duration::from_millis(timeout)).is_ok();
+            return TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok();
         }
     }
     false
@@ -54,24 +48,49 @@ fn scan_port(port: u16, address: &str, mode: &Mode) -> bool {
 pub fn main() {
     let cli = Cli::parse();
 
-    let mut open_ports: Vec<u16> = Vec::new();
+    let open_ports = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = vec![];
 
     match &cli.command {
         Some(Commands::Scan { mode, address }) => {
-            for i in 1..PORT_LIMIT {
-                let is_open = scan_port(i, address, mode);
-                if is_open {
-                    println!("{i}: OPEN");
-                    open_ports.push(i);
-                } else {
-                    println!("{i}: Closed");
+            if mode == &Mode::Fast {
+                // perform multithreading
+                for port in 1..PORT_LIMIT {
+                    let open_ports = Arc::clone(&open_ports);
+                    let address = address.clone();
+
+                    let handle = thread::spawn(move || {
+                        let addr = format!("{address}:{port}");
+                        if TcpStream::connect_timeout(
+                            &addr.parse().unwrap(),
+                            Duration::from_millis(500),
+                        )
+                        .is_ok()
+                        {
+                            open_ports.lock().unwrap().push(port);
+                        }
+                    });
+                    handles.push(handle);
+                }
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+            } else {
+                for port in 1..PORT_LIMIT {
+                    let is_open = scan_port(port, address);
+                    if is_open {
+                        println!("{port}: OPEN");
+                        open_ports.lock().unwrap().push(port);
+                    } else {
+                        println!("{port}: Closed");
+                    }
                 }
             }
         }
         None => {}
     }
 
-    for port in open_ports {
+    for port in open_ports.lock().unwrap().iter() {
         println!("{port} ..... OPEN")
     }
 }
