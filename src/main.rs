@@ -188,6 +188,7 @@ pub fn main() {
                 println!("port,protocol,name,description")
             }
             let mut shown_ports: Vec<u16> = vec![];
+            let mut shown_services: Vec<&Service> = Vec::new();
             for port in open_ports.lock().unwrap().iter() {
                 for service in services.iter() {
                     if service.port != *port {
@@ -195,7 +196,6 @@ pub fn main() {
                     }
                     let protocol = &service.protocol;
                     let name = &service.name;
-
                     match port_output {
                         Some(PortOutput::Tcp) if service.protocol != "tcp" => continue,
                         Some(PortOutput::Udp) if service.protocol != "udp" => continue,
@@ -207,10 +207,11 @@ pub fn main() {
                         continue;
                     }
                     shown_ports.push(service.port);
+                    shown_services.push(service);
 
                     match format {
                         Some(OutputFormat::Json) => {
-                            let json = serde_json::to_string_pretty(&services).unwrap();
+                            let json = serde_json::to_string_pretty(&shown_services).unwrap();
                             println!("{json}");
                         }
                         Some(OutputFormat::Csv) => {
