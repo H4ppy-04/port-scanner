@@ -1,16 +1,18 @@
 use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
+use directories::ProjectDirs;
 use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
-use std::{env, thread};
 
 const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
-const SERVICES_FILE: &str = "services.csv";
 
 #[derive(Parser)]
 #[command(version, about, arg_required_else_help = true, long_about = None)]
@@ -92,6 +94,15 @@ enum Commands {
         /// The default value is TCP.
         #[arg(value_enum, long)]
         port_output: Option<PortOutput>,
+
+        /// Output into a file.
+        ///
+        /// Automatically detects what format the file should write to based on the file extension.
+        /// If there is no file extension, it assumes raw text.
+        ///
+        /// WARNING: If the file exists, it will overwrite!
+        #[arg(long)]
+        output_file: Option<PathBuf>,
     },
 }
 
@@ -110,11 +121,36 @@ fn scan_port(port: u16, address: &str, timeout: Option<u64>) -> bool {
     false
 }
 
+fn ensure_services_csv() -> std::path::PathBuf {
+    let proj_dirs =
+        ProjectDirs::from("com", "Org", "PortScanner").expect("Failed to get project directories.");
+    let data_dir = proj_dirs.data_dir();
+    dbg!(data_dir);
+    if !data_dir.exists() {
+        fs::create_dir_all(data_dir).expect("Failed to create data directory.");
+    }
+    let service_path = data_dir.join("services.csv");
+
+    // copy if not exists
+    if !service_path.exists() {
+        let src_csv = Path::new("src/services.csv");
+        if src_csv.exists() {
+            fs::copy(src_csv, &service_path)
+                .expect("Failed to copy services.csv to data directory.");
+        } else {
+            panic!("src/services.csv not found in project")
+        }
+    }
+    service_path
+}
+
 pub fn main() {
     let cli = Cli::parse();
 
     let open_ports = Arc::new(Mutex::new(Vec::new()));
     let mut handles = vec![];
+
+    let service_path = ensure_services_csv();
 
     match cli.command {
         Some(Commands::Scan {
@@ -124,6 +160,7 @@ pub fn main() {
             timeout,
             format,
             port_output,
+            output_file,
         }) => {
             let port_limit = port.unwrap_or(PORT_LIMIT);
             if mode.is_some_and(|m| m == Mode::Fast) || mode.is_none() {
@@ -169,14 +206,6 @@ pub fn main() {
                 }
             }
 
-            let mut service_path: &str = SERVICES_FILE;
-            let dir = env::current_dir().unwrap();
-            let tmp_path: PathBuf;
-
-            if dir.join("Cargo.toml").exists() {
-                tmp_path = dir.join("src/services.csv");
-                service_path = tmp_path.to_str().unwrap();
-            }
             let mut reader = Reader::from_path(service_path).unwrap();
             let mut services: Vec<Service> = Vec::new();
             for i in reader.deserialize() {
@@ -184,9 +213,29 @@ pub fn main() {
                 services.push(service);
             }
 
-            if format == Some(OutputFormat::Csv) {
-                println!("port,protocol,name,description")
+            let outfile_extension: Option<String> = output_file
+                .as_ref()
+                .and_then(|fs| fs.extension())
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_string());
+
+            if let Some(fs) = output_file.clone() {
+                File::create(fs).unwrap();
             }
+
+            if format == Some(OutputFormat::Csv) {
+                let csv_header = "port,protocol,name,description";
+                println!("{csv_header}");
+                {
+                    if let Some(fs) = output_file.clone()
+                        && outfile_extension.clone().is_some_and(|ext| &ext == "csv")
+                    {
+                        let mut file = File::create(fs).unwrap();
+                        write!(file, "{csv_header}").unwrap();
+                    }
+                }
+            }
+
             let mut shown_ports: Vec<u16> = vec![];
             let mut shown_services: Vec<&Service> = Vec::new();
             for port in open_ports.lock().unwrap().iter() {
@@ -212,6 +261,16 @@ pub fn main() {
                     match format {
                         Some(OutputFormat::Json) => {
                             let json = serde_json::to_string_pretty(&shown_services).unwrap();
+                            if let Some(fs) = output_file.clone()
+                                && outfile_extension.clone().is_some_and(|ext| &ext == "json")
+                            {
+                                let mut file = OpenOptions::new()
+                                    .append(true)
+                                    .create(true)
+                                    .open(fs)
+                                    .unwrap();
+                                write!(file, "{json}").unwrap();
+                            }
                             println!("{json}");
                         }
                         Some(OutputFormat::Csv) => {
