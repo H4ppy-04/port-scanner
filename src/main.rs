@@ -1,8 +1,9 @@
+mod service;
+
 use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
 use directories::ProjectDirs;
 use indicatif::ProgressBar;
-use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -10,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use crate::service::Service;
 
 const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
@@ -19,14 +22,6 @@ const STATIC_TIMOUT_MS: u64 = 150;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Service {
-    name: String,
-    port: u16,
-    protocol: String,
-    comment: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum, Default)]
@@ -269,32 +264,10 @@ pub fn main() {
                     match format {
                         Some(OutputFormat::Json) => {
                             let json = serde_json::to_string_pretty(&shown_services).unwrap();
-                            if let Some(fs) = output_file.clone()
-                                && outfile_extension.clone().is_some_and(|ext| &ext == "json")
-                            {
-                                let mut file = OpenOptions::new()
-                                    .append(true)
-                                    .create(true)
-                                    .open(fs)
-                                    .unwrap();
-                                write!(file, "{json}").unwrap();
-                            }
                             println!("{json}");
                         }
-                        Some(OutputFormat::Csv) => {
-                            if let Some(description) = &service.comment {
-                                println!("{port},{protocol},{name},{description}");
-                            } else {
-                                println!("{port},{protocol},{name}");
-                            }
-                        }
-                        Some(OutputFormat::Text) | None => {
-                            if let Some(description) = &service.comment {
-                                println!("{port}/{protocol} - {name} ({description})");
-                            } else {
-                                println!("{port}/{protocol} - {name}");
-                            }
-                        }
+                        Some(OutputFormat::Csv) => service.output_csv(),
+                        Some(OutputFormat::Text) | None => service.output_text(),
                     }
                 }
             }
