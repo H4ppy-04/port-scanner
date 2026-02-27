@@ -4,9 +4,9 @@ use clap::{Parser, Subcommand, ValueEnum, value_parser};
 use csv::Reader;
 use directories::ProjectDirs;
 use indicatif::ProgressBar;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::Write;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -22,16 +22,6 @@ const STATIC_TIMOUT_MS: u64 = 150;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-}
-
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum, Default)]
-enum Mode {
-    /// Run swiftly. This uses multithreading and is much faster.
-    #[default]
-    Fast,
-
-    /// Crawly slowly
-    Slow,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
@@ -75,9 +65,6 @@ enum Commands {
         #[arg(short, long, value_parser = value_parser!(u16).range(0..=25565))]
         port: Option<u16>,
 
-        #[arg(value_enum, long)]
-        mode: Option<Mode>,
-
         /// How long (in milliseconds) a port gets scanned for before it's dropped.
         ///
         /// The default value is 150 if none is specified.
@@ -105,21 +92,6 @@ enum Commands {
         #[arg(long)]
         output_file: Option<PathBuf>,
     },
-}
-
-/// Establish if a port is open or closed.
-fn scan_port(port: u16, address: &str, timeout: Option<u64>) -> bool {
-    let socket = format!("{address}:{port}");
-    if let Ok(mut addrs) = socket.to_socket_addrs() {
-        if let Some(addr) = addrs.next() {
-            return TcpStream::connect_timeout(
-                &addr,
-                Duration::from_millis(timeout.unwrap_or(STATIC_TIMOUT_MS)),
-            )
-            .is_ok();
-        }
-    }
-    false
 }
 
 fn ensure_services_csv() -> std::path::PathBuf {
@@ -159,55 +131,41 @@ pub fn main() {
         Some(Commands::Scan {
             address,
             port,
-            mode,
             timeout,
             format,
             port_output,
             output_file,
         }) => {
             let port_limit = port.unwrap_or(PORT_LIMIT);
-            if mode.is_some_and(|m| m == Mode::Fast) || mode.is_none() {
-                // perform multithreading
-                let spinner = ProgressBar::new_spinner();
+            let spinner = ProgressBar::new_spinner();
 
-                for port in 1..=port_limit {
-                    let open_ports = Arc::clone(&open_ports);
-                    let address = address.clone();
+            for port in 1..=port_limit {
+                let open_ports = Arc::clone(&open_ports);
+                let address = address.clone();
 
-                    let handle = thread::spawn(move || {
-                        let addr = format!("{address}:{port}");
-                        if TcpStream::connect_timeout(
-                            &addr.parse().unwrap(),
-                            Duration::from_millis(timeout.unwrap_or(STATIC_TIMOUT_MS)),
-                        )
-                        .is_ok()
-                        {
-                            open_ports.lock().unwrap().push(port);
-                        }
-                    });
-                    handles.push(handle);
-                    spinner.set_message(format!("Scanning port {port}/{port_limit}"));
-                    spinner.tick();
-                }
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-                spinner.finish_with_message(format!(
-                    "Finished scanning {} ports ({} open)",
-                    port_limit,
-                    open_ports.lock().unwrap().iter().count()
-                ));
-            } else {
-                for port in 1..=port_limit {
-                    let is_open = scan_port(port, &address, timeout);
-                    if is_open {
-                        println!("{port}: OPEN");
+                let handle = thread::spawn(move || {
+                    let addr = format!("{address}:{port}");
+                    if TcpStream::connect_timeout(
+                        &addr.parse().unwrap(),
+                        Duration::from_millis(timeout.unwrap_or(STATIC_TIMOUT_MS)),
+                    )
+                    .is_ok()
+                    {
                         open_ports.lock().unwrap().push(port);
-                    } else {
-                        println!("{port}: Closed");
                     }
-                }
+                });
+                handles.push(handle);
+                spinner.set_message(format!("Scanning port {port}/{port_limit}"));
+                spinner.tick();
             }
+            for handle in handles {
+                handle.join().unwrap();
+            }
+            spinner.finish_with_message(format!(
+                "Finished scanning {} ports ({} open)",
+                port_limit,
+                open_ports.lock().unwrap().iter().count()
+            ));
 
             let mut reader = Reader::from_path(service_path).unwrap();
             let mut services: Vec<Service> = Vec::new();
@@ -246,8 +204,6 @@ pub fn main() {
                     if service.port != *port {
                         continue;
                     }
-                    let protocol = &service.protocol;
-                    let name = &service.name;
                     match port_output {
                         Some(PortOutput::Tcp) if service.protocol != "tcp" => continue,
                         Some(PortOutput::Udp) if service.protocol != "udp" => continue,
@@ -263,8 +219,7 @@ pub fn main() {
 
                     match format {
                         Some(OutputFormat::Json) => {
-                            let json = serde_json::to_string_pretty(&shown_services).unwrap();
-                            println!("{json}");
+                            println!("{}", serde_json::to_string_pretty(&shown_services).unwrap())
                         }
                         Some(OutputFormat::Csv) => service.output_csv(),
                         Some(OutputFormat::Text) | None => service.output_text(),
