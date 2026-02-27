@@ -15,7 +15,7 @@ const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
 
 #[derive(Parser)]
-#[command(version, about, arg_required_else_help = true, long_about = None)]
+#[command(version, about = "Multithreaded port scanner", arg_required_else_help = true, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -63,6 +63,12 @@ enum PortOutput {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Get service csv file
+    ///
+    /// If downloading from source, if your /etc/services path is more expansive, run
+    /// src/clean_services.py and replace the default services.csv file.
+    GetServicePath,
+
     /// Scan port range
     Scan {
         #[arg()]
@@ -125,7 +131,6 @@ fn ensure_services_csv() -> std::path::PathBuf {
     let proj_dirs =
         ProjectDirs::from("com", "Org", "PortScanner").expect("Failed to get project directories.");
     let data_dir = proj_dirs.data_dir();
-    dbg!(data_dir);
     if !data_dir.exists() {
         fs::create_dir_all(data_dir).expect("Failed to create data directory.");
     }
@@ -153,6 +158,9 @@ pub fn main() {
     let service_path = ensure_services_csv();
 
     match cli.command {
+        Some(Commands::GetServicePath) => {
+            dbg!(service_path);
+        }
         Some(Commands::Scan {
             address,
             port,
