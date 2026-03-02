@@ -1,17 +1,23 @@
+mod commands;
+mod output_format;
+mod port_output;
 mod service;
 
-use clap::{Parser, Subcommand, ValueEnum, value_parser};
+use crate::commands::Commands;
+use clap::Parser;
 use csv::Reader;
 use directories::ProjectDirs;
 use indicatif::ProgressBar;
 use std::fs::{self, File};
 use std::io::Write;
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use crate::output_format::OutputFormat;
+use crate::port_output::PortOutput;
 use crate::service::Service;
 
 const PORT_LIMIT: u16 = 1024;
@@ -22,76 +28,6 @@ const STATIC_TIMOUT_MS: u64 = 150;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-}
-
-#[derive(Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
-enum OutputFormat {
-    /// Comma separated value format
-    Csv,
-    /// JavaScript object notation format
-    Json,
-    /// Plain text format
-    #[default]
-    Text,
-}
-
-#[derive(Default, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, ValueEnum)]
-enum PortOutput {
-    /// Show only TCP
-    #[default]
-    Tcp,
-    /// Show only UDP
-    Udp,
-    /// Show both TCP, UDP, and any other protocols
-    All,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Get service csv file
-    ///
-    /// If downloading from source, if your /etc/services path is more expansive, run
-    /// src/clean_services.py and replace the default services.csv file.
-    GetServicePath,
-
-    /// Scan port range
-    Scan {
-        #[arg()]
-        address: String,
-
-        /// Port limit within address to scan
-        ///
-        /// The default is capped at 1024, however this can be changed up to 25565
-        #[arg(short, long, value_parser = value_parser!(u16).range(0..=25565))]
-        port: Option<u16>,
-
-        /// How long (in milliseconds) a port gets scanned for before it's dropped.
-        ///
-        /// The default value is 150 if none is specified.
-        #[arg(long)]
-        timeout: Option<u64>,
-
-        /// How to parse the output format.
-        ///
-        /// The default value is simply plain text.
-        #[arg(long, value_enum)]
-        format: Option<OutputFormat>,
-
-        /// Port options to show.
-        ///
-        /// The default value is TCP.
-        #[arg(value_enum, long)]
-        port_output: Option<PortOutput>,
-
-        /// Output into a file.
-        ///
-        /// Automatically detects what format the file should write to based on the file extension.
-        /// If there is no file extension, it assumes raw text.
-        ///
-        /// WARNING: If the file exists, it will overwrite!
-        #[arg(long)]
-        output_file: Option<PathBuf>,
-    },
 }
 
 fn ensure_services_csv() -> std::path::PathBuf {
