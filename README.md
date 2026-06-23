@@ -15,13 +15,17 @@ A blazingly fast port scanner written in Rust 🦀
 ## Usage
 
 ```
+Multithreaded port scanner
+
 Usage: port-scanner [COMMAND]
 
 Commands:
-  scan  Scan port range
-  help  Print this message or the help of the given subcommand(s)
+  get-service-path  Get service csv file
+  scan              Scan port range
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
   -V, --version  Print version
+```
 ```
