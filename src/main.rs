@@ -337,10 +337,14 @@ pub fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use crate::download_services_file;
 
     #[test]
     fn test_request() {
-        assert!(download_services_file().is_ok())
+        assert!(download_services_file().is_ok());
+        // just assuming this is run from 'cargo test' in the main project directory.
+        assert!(fs::remove_file("services.csv").is_ok());
     }
 }
