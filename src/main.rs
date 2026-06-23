@@ -14,6 +14,8 @@ use std::time::Duration;
 
 const PORT_LIMIT: u16 = 1024;
 const STATIC_TIMOUT_MS: u64 = 150;
+const SERVICES_URL: &str =
+    "https://raw.githubusercontent.com/H4ppy-04/port-scanner/refs/heads/main/src/services.csv";
 
 #[derive(Parser)]
 #[command(version, about = "Multithreaded port scanner", arg_required_else_help = true, long_about = None)]
@@ -129,10 +131,11 @@ fn scan_port(port: u16, address: &str, timeout: Option<u64>) -> bool {
 }
 
 fn download_services_file() -> Result<(), Box<dyn std::error::Error>> {
-    let target =
-        "https://raw.githubusercontent.com/H4ppy-04/port-scanner/refs/heads/main/src/services.csv";
-    println!("{}", format!("Downloading services file from {target}"));
-    let mut response = reqwest::blocking::get(target)?;
+    println!(
+        "{}",
+        format!("Downloading services file from {SERVICES_URL}")
+    );
+    let mut response = reqwest::blocking::get(SERVICES_URL).expect("Failed to get response.");
     let mut dest = File::create("services.csv")?;
     copy(&mut response, &mut dest)?;
     println!("Finished");
@@ -158,6 +161,13 @@ fn ensure_services_csv() -> std::path::PathBuf {
         let cwd = std::env::current_dir().unwrap();
         if cwd.file_name().is_some_and(|name| name == "debug") {
             // need to create new file
+
+            match download_services_file() {
+                Ok(_) => {}
+                Err(_) => {
+                    eprintln!("Failed to download services file.");
+                }
+            }
             download_services_file().unwrap();
             return cwd.join("services.csv");
         }
