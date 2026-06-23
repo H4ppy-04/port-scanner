@@ -5,6 +5,7 @@ use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::io::copy;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -127,6 +128,17 @@ fn scan_port(port: u16, address: &str, timeout: Option<u64>) -> bool {
     false
 }
 
+fn download_services_file() -> Result<(), Box<dyn std::error::Error>> {
+    let target =
+        "https://raw.githubusercontent.com/H4ppy-04/port-scanner/refs/heads/main/src/services.csv";
+    println!("{}", format!("Downloading services file from {target}"));
+    let mut response = reqwest::blocking::get(target)?;
+    let mut dest = File::create("services.csv")?;
+    copy(&mut response, &mut dest)?;
+    println!("Finished");
+    Ok(())
+}
+
 fn ensure_services_csv() -> std::path::PathBuf {
     let proj_dirs =
         ProjectDirs::from("com", "Org", "PortScanner").expect("Failed to get project directories.");
@@ -139,6 +151,16 @@ fn ensure_services_csv() -> std::path::PathBuf {
     // copy if not exists
     if !service_path.exists() {
         let src_csv = Path::new("src/services.csv");
+
+        let mut target_path = PathBuf::new();
+        target_path.push("target");
+
+        let cwd = std::env::current_dir().unwrap();
+        if cwd.file_name().is_some_and(|name| name == "debug") {
+            // need to create new file
+            download_services_file().unwrap();
+            return cwd.join("services.csv");
+        }
         if src_csv.exists() {
             fs::copy(src_csv, &service_path)
                 .expect("Failed to copy services.csv to data directory.");
@@ -299,6 +321,6 @@ pub fn main() {
                 }
             }
         }
-        None => {}
+        _ => {}
     }
 }
