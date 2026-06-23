@@ -334,3 +334,13 @@ pub fn main() {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::download_services_file;
+
+    #[test]
+    fn test_request() {
+        assert!(download_services_file().is_ok())
+    }
+}
