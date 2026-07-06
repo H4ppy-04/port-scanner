@@ -1,3 +1,9 @@
+"""
+Description: Parser for services file.
+Caveat: This is only compatible with NIX systems
+due to how the fs is structured.
+"""
+
 import sys
 import os
 import csv
